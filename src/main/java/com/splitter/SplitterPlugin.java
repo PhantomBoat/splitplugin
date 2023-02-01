@@ -8,15 +8,19 @@ import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.events.ChatMessage;
-import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.chat.ChatColorType;
 import net.runelite.client.chat.ChatMessageBuilder;
 import net.runelite.client.config.ConfigManager;
-import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.config.RuneLiteConfig;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.chat.ChatCommandManager;
 import net.runelite.client.util.QuantityFormatter;
+import net.runelite.http.api.item.ItemPrice;
+import net.runelite.client.game.ItemManager;
+
+import java.util.Arrays;
+import java.util.List;
 
 import static java.lang.Integer.parseInt;
 
@@ -35,6 +39,12 @@ public class SplitterPlugin extends Plugin {
 
     @Inject
     private ChatCommandManager chatCommandManager;
+
+    @Inject
+    private ItemManager itemManager;
+
+    @Inject
+    private RuneLiteConfig runeLiteConfig;
 
     @Override
     protected void startUp() throws Exception {
@@ -57,19 +67,11 @@ public class SplitterPlugin extends Plugin {
     void computeSplit(ChatMessage chatMessage, String message) {
         int CoinID = 995;
         int PlatTokenID = 13204;
-        String coinSplit = "Coin";
-        String platinumSplit = "Platinum Token";
         ItemContainer container = client.getItemContainer(InventoryID.INVENTORY);
 
         MessageNode messageNode = chatMessage.getMessageNode();
         if (container == null) {
-            log.info("Inventory is empty and hasn't loaded.");
-            final ChatMessageBuilder chatMessageBuilder = new ChatMessageBuilder()
-                    .append(ChatColorType.HIGHLIGHT)
-                    .append("No Coin(s) or Platinum token(s) in the inventory.");
-            final String response = chatMessageBuilder.build();
-            messageNode.setRuneLiteFormatMessage(response);
-            client.refreshChat();
+            inventoryHasNotLoaded(messageNode);
             return;
         }
 
@@ -79,14 +81,37 @@ public class SplitterPlugin extends Plugin {
 
         if (message.length() > SPLIT_COMMAND_STRING.length()) {
             String msgSplitSize = message.substring(SPLIT_COMMAND_STRING.length() + 1);
-            try {
-                splitSize = parseInt(msgSplitSize);
-            } catch (NumberFormatException e) {
-                log.debug("Invalid split input");
-                return;
-            }
-            if (splitSize <= 0) {
-                log.debug("Invalid split size");
+            String[] msgSplitSizeParts = msgSplitSize.split(" ");
+            if (msgSplitSizeParts.length == 1) {
+                try {
+                    splitSize = parseInt(msgSplitSize);
+                } catch (NumberFormatException e) {
+                    valueToSplit = itemPriceLookup(msgSplitSize);
+                    if (valueToSplit < 1) {
+                        log.debug("Invalid split input");
+                        return;
+                    }
+                }
+                if (splitSize <= 0) {
+                    log.debug("Invalid split size");
+                    return;
+                }
+            } else if (msgSplitSizeParts.length > 1) {
+                try {
+                    splitSize = parseInt(msgSplitSizeParts[msgSplitSizeParts.length - 1]);
+                } catch (NumberFormatException e) {
+                    log.debug("Invalid split input");
+                    return;
+                }
+                if (splitSize <= 0) {
+                    log.debug("Invalid split size");
+                    return;
+                }
+                int itemPrice = itemPriceLookup(msgSplitSize);
+                if (itemPrice > 0) {
+                    valueToSplit = itemPrice;
+                }
+            } else {
                 return;
             }
         }
@@ -94,24 +119,176 @@ public class SplitterPlugin extends Plugin {
         int splitValue = valueToSplit / splitSize;
 
         if (!hasPlatinum && !container.contains(CoinID)) {
-            final ChatMessageBuilder chatMessageBuilder = new ChatMessageBuilder()
-                    .append(ChatColorType.HIGHLIGHT)
-                    .append("No Coin(s) or Platinum token(s) in the inventory.");
-            final String response = chatMessageBuilder.build();
-            log.debug("No money in the inventory.");
-            messageNode.setRuneLiteFormatMessage(response);
-            client.refreshChat();
+            noCashMessage(messageNode);
             return;
         }
 
+        printSplit(hasPlatinum, splitValue, valueToSplit, splitSize, messageNode);
+    }
+
+    /**
+     * Returns item GE price if found in substring. Returns 0 if
+     *
+     * @param substring the message with "!split " removed
+     * @return if positive it's the item ID, otherwise it's an error code. -1 if no item found, -2 item could not be identified,
+     * -3 code path error
+     */
+
+    private int itemIdLookup(String substring) {
+        String[] substringParts = substring.split(" ");
+
+        // substring is either the splitSize or item name to split by default
+        if (substringParts.length < 2) {
+            // if the substring can be parsed then it's presumed to be splitSize and not an item
+            try {
+                parseInt(substring);
+                return -1;
+            } catch (NumberFormatException e) {
+                return itemId(substring);
+            }
+        } else {
+            try {
+                parseInt(substringParts[substringParts.length - 1]);
+                String[] allButLastElement = Arrays.copyOf(substringParts, substringParts.length - 1);
+                return itemId(String.join("", allButLastElement));
+
+            } catch (NumberFormatException e) {
+                return itemId(substring);
+            }
+        }
+    }
+
+    /**
+     * COPIED FROM ChatCommandsPlugin.java with some modifications
+     * Copyright (c) 2017, Adam <Adam@sigterm.info>
+     *
+     * @param substring the message with "!split " removed
+     * @return if positive it's the item ID, otherwise it's an error code. -2 item could not be identified
+     */
+    private int itemId(String substring) {
+
+        List<ItemPrice> results = itemManager.search(substring);
+
+        if (!results.isEmpty()) {
+            ItemPrice item = retrieveFromList(results, substring);
+            return item.getId();
+        }
+        return -2;
+    }
+
+    /**
+     * Returns item GE price if found in substring. Returns 0 if
+     *
+     * @param substring the message with "!split " removed
+     * @return if positive it's GE price, otherwise it's an error code. -1 if no item found, -2 item could not be identified,
+     * -3 code path error
+     */
+
+    private int itemPriceLookup(String substring) {
+        String[] substringParts = substring.split(" ");
+
+        // substring is either the splitSize or item name to split by default
+        if (substringParts.length < 2) {
+            // if the substring can be parsed then it's presumed to be splitSize and not an item
+            try {
+                parseInt(substring);
+                return -1;
+            } catch (NumberFormatException e) {
+                return itemPrice(substring);
+            }
+        } else {
+            try {
+                parseInt(substringParts[substringParts.length - 1]);
+                String[] allButLastElement = Arrays.copyOf(substringParts, substringParts.length - 1);
+                return itemPrice(String.join("", allButLastElement));
+
+            } catch (NumberFormatException e) {
+                return itemPrice(substring);
+            }
+        }
+    }
+
+    /**
+     * COPIED FROM ChatCommandsPlugin.java with some modifications
+     * Copyright (c) 2017, Adam <Adam@sigterm.info>
+     *
+     * @param substring the message with "!split " removed
+     * @return if positive it's GE price, otherwise it's an error code. -2 item could not be identified
+     */
+    private int itemPrice(String substring) {
+
+        List<ItemPrice> results = itemManager.search(substring);
+
+        if (!results.isEmpty()) {
+            ItemPrice item = retrieveFromList(results, substring);
+
+            return runeLiteConfig.useWikiItemPrices() ? itemManager.getWikiPrice(item) : item.getPrice();
+        }
+        return -2;
+    }
+
+    /**
+     * COPIED FROM ChatCommandsPlugin.java
+     * Copyright (c) 2017, Adam <Adam@sigterm.info>
+     * <p>
+     * Compares the names of the items in the list with the original input.
+     * Returns the item if its name is equal to the original input or the
+     * shortest match if no exact match is found.
+     *
+     * @param items         List of items.
+     * @param originalInput String with the original input.
+     * @return Item which has a name equal to the original input.
+     */
+    private ItemPrice retrieveFromList(List<ItemPrice> items, String originalInput) {
+        ItemPrice shortest = null;
+        for (ItemPrice item : items) {
+            // if statement modified based on IntelliJ suggestion
+            if (item.getName().equalsIgnoreCase(originalInput)) {
+                return item;
+            }
+
+            if (shortest == null || item.getName().length() < shortest.getName().length()) {
+                shortest = item;
+            }
+        }
+
+        // Take a guess
+        return shortest;
+    }
+
+    private void noCashMessage(MessageNode messageNode) {
+        final ChatMessageBuilder chatMessageBuilder = new ChatMessageBuilder()
+                .append(ChatColorType.HIGHLIGHT)
+                .append("No Coin(s) or Platinum token(s) in the inventory.");
+        final String response = chatMessageBuilder.build();
+        log.debug("No money in the inventory.");
+        messageNode.setRuneLiteFormatMessage(response);
+        client.refreshChat();
+    }
+
+    private void inventoryHasNotLoaded(MessageNode messageNode) {
+        log.info("Inventory is empty and hasn't loaded.");
+        final ChatMessageBuilder chatMessageBuilder = new ChatMessageBuilder()
+                .append(ChatColorType.HIGHLIGHT)
+                .append("No Coin(s) or Platinum token(s) in the inventory.");
+        final String response = chatMessageBuilder.build();
+        messageNode.setRuneLiteFormatMessage(response);
+        client.refreshChat();
+    }
+
+    private void printSplit(boolean hasPlatinum, int splitValue, int valueToSplit, int splitSize, MessageNode messageNode) {
+        String coinSplit = "Coin";
+        String platinumSplit = "Platinum Token";
+
         String splitType = (hasPlatinum) ? platinumSplit : coinSplit;
+
         final ChatMessageBuilder chatMessageBuilder = new ChatMessageBuilder()
                 .append(ChatColorType.HIGHLIGHT)
                 .append(QuantityFormatter.formatNumber(splitValue))
                 .append(ChatColorType.NORMAL)
                 .append(" ")
                 .append(splitType)
-                .append(" , ( ")
+                .append(", ( ")
                 .append(ChatColorType.HIGHLIGHT)
                 .append(QuantityFormatter.formatNumber(valueToSplit))
                 .append(ChatColorType.NORMAL)
@@ -124,7 +301,6 @@ public class SplitterPlugin extends Plugin {
         log.debug("Split:" + splitValue);
         messageNode.setRuneLiteFormatMessage(response);
         client.refreshChat();
-
     }
 
     @Provides
