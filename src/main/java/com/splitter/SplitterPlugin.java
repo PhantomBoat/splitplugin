@@ -8,13 +8,13 @@ import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.*;
 import net.runelite.api.events.ChatMessage;
-import net.runelite.client.chat.ChatColorType;
-import net.runelite.client.chat.ChatMessageBuilder;
+import net.runelite.api.events.CommandExecuted;
+import net.runelite.client.chat.*;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.config.RuneLiteConfig;
+import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
-import net.runelite.client.chat.ChatCommandManager;
 import net.runelite.client.util.QuantityFormatter;
 import net.runelite.http.api.item.ItemPrice;
 import net.runelite.client.game.ItemManager;
@@ -46,6 +46,18 @@ public class SplitterPlugin extends Plugin {
     @Inject
     private RuneLiteConfig runeLiteConfig;
 
+    @Inject
+    private ChatMessageManager chatMessageManager;
+
+    @Subscribe
+    public void onCommandExecuted(CommandExecuted commandExecuted)
+    {
+        if (commandExecuted.getCommand().equals("split"))
+        {
+            computeSplit(commandExecuted.getArguments());
+        }
+    }
+
     @Override
     protected void startUp() throws Exception {
         log.info("SPLITTER SIZE:" + config.splitSize());
@@ -55,6 +67,21 @@ public class SplitterPlugin extends Plugin {
     @Override
     protected void shutDown() throws Exception {
         log.info("Splitter stopped!");
+    }
+
+    void computeSplit(String[] args)
+    {
+        int CoinID = 995;
+        int PlatTokenID = 13204;
+        ItemPrice item = null;
+        ItemContainer container = client.getItemContainer(InventoryID.INVENTORY);
+        if (container != null)
+        {
+            String nrOfCoins = String.valueOf(container.count(CoinID));
+            chatMessageManager.queue(QueuedMessage.builder().type(ChatMessageType.GAMEMESSAGE).value(nrOfCoins).build());
+        }
+
+
     }
 
     /**
