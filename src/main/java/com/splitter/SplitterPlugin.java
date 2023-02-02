@@ -50,10 +50,8 @@ public class SplitterPlugin extends Plugin {
     private ChatMessageManager chatMessageManager;
 
     @Subscribe
-    public void onCommandExecuted(CommandExecuted commandExecuted)
-    {
-        if (commandExecuted.getCommand().equals("split"))
-        {
+    public void onCommandExecuted(CommandExecuted commandExecuted) {
+        if (commandExecuted.getCommand().equals("split")) {
             computeSplit(commandExecuted.getArguments());
         }
     }
@@ -69,20 +67,170 @@ public class SplitterPlugin extends Plugin {
         log.info("Splitter stopped!");
     }
 
-    void computeSplit(String[] args)
-    {
+    void computeSplit(String[] args) {
         int CoinID = 995;
         int PlatTokenID = 13204;
         ItemPrice item = null;
         ItemContainer container = client.getItemContainer(InventoryID.INVENTORY);
+
+        if (container == null && args.length == 0) {
+            inventoryHasNotLoaded();
+            return;
+        }
+
+        int splitSize = config.splitSize();
+        boolean hasPlatinum = false;
+        int valueToSplit = -1;
         if (container != null)
         {
-            String nrOfCoins = String.valueOf(container.count(CoinID));
-            chatMessageManager.queue(QueuedMessage.builder().type(ChatMessageType.GAMEMESSAGE).value(nrOfCoins).build());
+            hasPlatinum = container.contains(PlatTokenID);
+            valueToSplit = (hasPlatinum) ? container.count(PlatTokenID) : container.count(CoinID);
         }
 
 
+        if (args.length == 0) {
+            int splitValue = valueToSplit / splitSize;
+            if (valueToSplit == 0) {
+                noCashMessage();
+                return;
+            }
+
+            printSplit(hasPlatinum, splitValue, valueToSplit, splitSize);
+            return;
+        } else if (args.length == 1) {
+            try {
+                splitSize = parseInt(args[0]);
+            } catch (NumberFormatException e) {
+                item = itemPriceLookup(args[0]);
+                if (item == null) {
+                    log.debug("Invalid split input");
+                    printUnableToFindItem(args[0]);
+                    return;
+                }
+
+                valueToSplit = runeLiteConfig.useWikiItemPrices() ? itemManager.getWikiPrice(item) : item.getPrice();
+            }
+        } else {
+            String[] argElements;
+            try {
+                splitSize = parseInt(args[args.length - 1]);
+                argElements = Arrays.copyOf(args, args.length - 1);
+            } catch (NumberFormatException e) {
+                argElements = args;
+            }
+            if (splitSize <= 0) {
+                log.debug("Invalid split size");
+                return;
+            }
+
+            item = itemPriceLookup(String.join("", argElements));
+            if (item != null) {
+                valueToSplit = runeLiteConfig.useWikiItemPrices() ? itemManager.getWikiPrice(item) : item.getPrice();
+            } else {
+                printUnableToFindItem(String.join("", argElements));
+                return;
+            }
+        }
+
+        int splitValue = valueToSplit / splitSize;
+
+        if (item != null) {
+            printSplitItem(item.getName(), splitValue, valueToSplit, splitSize);
+        } else {
+            printSplit(hasPlatinum, splitValue, valueToSplit, splitSize);
+        }
     }
+
+    private void inventoryHasNotLoaded() {
+        log.debug("Inventory is empty and hasn't loaded.");
+        chatMessageManager.queue(QueuedMessage.builder()
+                .type(ChatMessageType.GAMEMESSAGE)
+                .value("No Coin(s) or Platinum token(s) in the inventory.")
+                .build());
+    }
+
+    private void noCashMessage() {
+        log.debug("No money in the inventory.");
+        chatMessageManager.queue(QueuedMessage.builder()
+                .type(ChatMessageType.GAMEMESSAGE)
+                .value("No Coin(s) or Platinum token(s) in the inventory.")
+                .build());
+    }
+
+    private void printSplit(boolean hasPlatinum, int splitValue, int valueToSplit, int splitSize) {
+        String coinSplit = "Coin";
+        String platinumSplit = "Platinum token";
+
+        String splitType = (hasPlatinum) ? platinumSplit : coinSplit;
+
+        final String response = new ChatMessageBuilder()
+                .append("Splitting " + splitType + "s ")
+                .append(ChatColorType.HIGHLIGHT)
+                .append(QuantityFormatter.formatNumber(splitValue))
+                .append(ChatColorType.NORMAL)
+                .append(", ( ")
+                .append(ChatColorType.HIGHLIGHT)
+                .append(QuantityFormatter.formatNumber(valueToSplit))
+                .append(ChatColorType.NORMAL)
+                .append(" / ")
+                .append(ChatColorType.HIGHLIGHT)
+                .append(QuantityFormatter.formatNumber(splitSize))
+                .append(ChatColorType.NORMAL)
+                .append(" )")
+                .build();
+
+        chatMessageManager.queue(QueuedMessage.builder()
+                .type(ChatMessageType.CONSOLE)
+                .runeLiteFormattedMessage(response)
+                .build());
+        log.debug("Split:" + splitValue);
+    }
+
+    private void printSplitItem(String itemName, int splitValue, int valueToSplit, int splitSize) {
+        final String response = new ChatMessageBuilder()
+                .append("Splitting ")
+                .append(ChatColorType.HIGHLIGHT)
+                .append(itemName)
+                .append(ChatColorType.NORMAL)
+                .append(": ")
+                .append(ChatColorType.HIGHLIGHT)
+                .append(QuantityFormatter.formatNumber(splitValue))
+                .append(ChatColorType.NORMAL)
+                .append(", ( ")
+                .append(ChatColorType.HIGHLIGHT)
+                .append(QuantityFormatter.formatNumber(valueToSplit))
+                .append(ChatColorType.NORMAL)
+                .append(" / ")
+                .append(ChatColorType.HIGHLIGHT)
+                .append(QuantityFormatter.formatNumber(splitSize))
+                .append(ChatColorType.NORMAL)
+                .append(" )")
+                .build();
+
+        chatMessageManager.queue(QueuedMessage.builder()
+                .type(ChatMessageType.CONSOLE)
+                .runeLiteFormattedMessage(response)
+                .build());
+        log.debug("Split:" + splitValue);
+    }
+
+    private void printUnableToFindItem(String searchString) {
+        final String response = new ChatMessageBuilder()
+                .append(ChatColorType.HIGHLIGHT)
+                .append("Unable to find item '")
+                .append(ChatColorType.NORMAL)
+                .append(searchString)
+                .append(ChatColorType.HIGHLIGHT)
+                .append("'.")
+                .build();
+
+        chatMessageManager.queue(QueuedMessage.builder()
+                .type(ChatMessageType.CONSOLE)
+                .runeLiteFormattedMessage(response)
+                .build());
+        log.debug("Unable to find item");
+    }
+
 
     /**
      * Computes the split of gold or platinum tokens and replaces the message in chat with the number. (floor)
@@ -153,11 +301,9 @@ public class SplitterPlugin extends Plugin {
             return;
         }
 
-        if (item != null)
-        {
+        if (item != null) {
             printSplitItem(item.getName(), splitValue, valueToSplit, splitSize, messageNode);
-        }
-        else {
+        } else {
             printSplit(hasPlatinum, splitValue, valueToSplit, splitSize, messageNode);
         }
     }
@@ -286,8 +432,6 @@ public class SplitterPlugin extends Plugin {
     }
 
     private void printSplitItem(String itemName, int splitValue, int valueToSplit, int splitSize, MessageNode messageNode) {
-        String platinumSplit = "Platinum Token";
-
         final ChatMessageBuilder chatMessageBuilder = new ChatMessageBuilder()
                 .append("Splitting ")
                 .append(ChatColorType.HIGHLIGHT)
