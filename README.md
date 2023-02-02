@@ -1,15 +1,15 @@
 # Splitter
-Type `!split` in-game to calculate the split of the current coins or platinum tokens in you inventory. Or you can use it to see how much the split of an item would be by typing `!split <item-name>`.
+Type `::split` in-game to calculate the split of the current coins or platinum tokens in you inventory. Or you can use it to see how much the split of an item would be by typing `::split <item-name>`.
 
 ![Demonstrating the results of using the plugin](https://i.imgur.com/xNCLNgq.png)
 
 The calcutation is floored. This means that 10/3=3.
 
 ## Usage
-* Using `!split` will do the calculation based on the default number to split by (which can be changed in the plugins configuration).
-* Using `!split 3` will split the value by 3 regardless of the default value. Any number greater than 0 can be used. **MUST be an integer**.
-* Using `!split arcane` will get the GE price using the same logic as `!price` and split it with the default number to split by.
-* Using `!split arcane 5` will get the GE price using the same logic as `!price` and split it 5 ways.
+* Using `::split` will do the calculation based on the default number to split by (which can be changed in the plugins configuration).
+* Using `::split 3` will split the value by 3 regardless of the default value. Any number greater than 0 can be used. **MUST be an integer**.
+* Using `::split arcane` will get the GE price using the same logic as `!price` and split it with the default number to split by.
+* Using `::split arcane 5` will get the GE price using the same logic as `!price` and split it 5 ways.
 
 ![Showing the results of splitting arcane 5-ways](https://i.imgur.com/KYNjieL.png, "Spltting arcane 5-ways")
 
