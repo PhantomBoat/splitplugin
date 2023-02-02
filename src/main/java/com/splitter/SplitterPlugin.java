@@ -30,7 +30,7 @@ import static java.lang.Integer.parseInt;
         name = "Splitter"
 )
 public class SplitterPlugin extends Plugin {
-    private static final String SPLIT_COMMAND_STRING = "!split";
+    private static final String SPLIT_COMMAND_STRING = "split";
     @Inject
     private Client client;
 
@@ -51,7 +51,7 @@ public class SplitterPlugin extends Plugin {
 
     @Subscribe
     public void onCommandExecuted(CommandExecuted commandExecuted) {
-        if (commandExecuted.getCommand().equals("split")) {
+        if (commandExecuted.getCommand().equals(SPLIT_COMMAND_STRING)) {
             computeSplit(commandExecuted.getArguments());
         }
     }
@@ -59,7 +59,6 @@ public class SplitterPlugin extends Plugin {
     @Override
     protected void startUp() throws Exception {
         log.info("SPLITTER SIZE:" + config.splitSize());
-        chatCommandManager.registerCommandAsync(SPLIT_COMMAND_STRING, this::computeSplit);
     }
 
     @Override
@@ -67,12 +66,25 @@ public class SplitterPlugin extends Plugin {
         log.info("Splitter stopped!");
     }
 
+    /**
+     * Calculates the appropriate split based on either gold (coins or platinum tokens) in inventory or items based on args.
+     * Then calls subroutines which prints the appropriate message in chat. The item lookup uses the same logic (copied) from
+     * !price command.
+     *
+     * @param args args from the ::command call. If length == 0, splits gold in inventory.
+     *             If length == 1, checks if args[0] is an integer, if so changes the number to split by to this integer.
+     *             If args[0] is not an integer, presumes it's a search term for item to split by default split size.
+     *             If length > 1, checks if the last element in args is an integer, if so sets that as split size. It then
+     *             uses the rest of the elements as search term for an item. If last element isn't an integer all elements
+     *             in args is used as the search term.
+     */
     void computeSplit(String[] args) {
         int CoinID = 995;
         int PlatTokenID = 13204;
         ItemPrice item = null;
         ItemContainer container = client.getItemContainer(InventoryID.INVENTORY);
 
+        // container == null if since logged in there has been no items in the inventory.
         if (container == null && args.length == 0) {
             inventoryHasNotLoaded();
             return;
@@ -81,12 +93,10 @@ public class SplitterPlugin extends Plugin {
         int splitSize = config.splitSize();
         boolean hasPlatinum = false;
         int valueToSplit = -1;
-        if (container != null)
-        {
+        if (container != null) {
             hasPlatinum = container.contains(PlatTokenID);
             valueToSplit = (hasPlatinum) ? container.count(PlatTokenID) : container.count(CoinID);
         }
-
 
         if (args.length == 0) {
             int splitValue = valueToSplit / splitSize;
@@ -141,6 +151,10 @@ public class SplitterPlugin extends Plugin {
         }
     }
 
+    /**
+     * Informs the user there is no gold (coins or platinum tokens) in the inventory. Logs in debug that this is because
+     * inventory wasn't loaded. This function doesn't check if this is actually the case.
+     */
     private void inventoryHasNotLoaded() {
         log.debug("Inventory is empty and hasn't loaded.");
         chatMessageManager.queue(QueuedMessage.builder()
@@ -149,6 +163,10 @@ public class SplitterPlugin extends Plugin {
                 .build());
     }
 
+    /**
+     * Informs the user there is no gold (coins or platinum tokens) in the inventory. Logs in debug that this is because
+     * inventory didn't contain any gold. This function doesn't check if this is actually the case.
+     */
     private void noCashMessage() {
         log.debug("No money in the inventory.");
         chatMessageManager.queue(QueuedMessage.builder()
@@ -157,6 +175,14 @@ public class SplitterPlugin extends Plugin {
                 .build());
     }
 
+    /**
+     * Prints split in chat with formatted text. Intended for when splitting coins or platinum tokens, not for splitting items.
+     *
+     * @param hasPlatinum true if splitting platinum tokens, false if splitting coins
+     * @param splitValue the value of each portion of the split
+     * @param valueToSplit the total value to split
+     * @param splitSize the number of portions
+     */
     private void printSplit(boolean hasPlatinum, int splitValue, int valueToSplit, int splitSize) {
         String coinSplit = "Coin";
         String platinumSplit = "Platinum token";
@@ -186,6 +212,14 @@ public class SplitterPlugin extends Plugin {
         log.debug("Split:" + splitValue);
     }
 
+    /**
+     * Prints split in chat with formatted text. Intended for when splitting items, not coins or platinum tokens.
+     *
+     * @param itemName name of the item being split
+     * @param splitValue the value of each portion of the split
+     * @param valueToSplit the total value to split
+     * @param splitSize the number of portions
+     */
     private void printSplitItem(String itemName, int splitValue, int valueToSplit, int splitSize) {
         final String response = new ChatMessageBuilder()
                 .append("Splitting ")
@@ -214,6 +248,11 @@ public class SplitterPlugin extends Plugin {
         log.debug("Split:" + splitValue);
     }
 
+    /**
+     * Prints that item could not be found. This function doesn't check if this is actually the case.
+     *
+     * @param searchString the search term used which did not find an item
+     */
     private void printUnableToFindItem(String searchString) {
         final String response = new ChatMessageBuilder()
                 .append(ChatColorType.HIGHLIGHT)
@@ -229,83 +268,6 @@ public class SplitterPlugin extends Plugin {
                 .runeLiteFormattedMessage(response)
                 .build());
         log.debug("Unable to find item");
-    }
-
-
-    /**
-     * Computes the split of gold or platinum tokens and replaces the message in chat with the number. (floor)
-     *
-     * @param chatMessage The chat message containing the command.
-     * @param message     The chat message
-     */
-    @VisibleForTesting
-    void computeSplit(ChatMessage chatMessage, String message) {
-        int CoinID = 995;
-        int PlatTokenID = 13204;
-        ItemPrice item = null;
-        ItemContainer container = client.getItemContainer(InventoryID.INVENTORY);
-
-        MessageNode messageNode = chatMessage.getMessageNode();
-        if (container == null) {
-            inventoryHasNotLoaded(messageNode);
-            return;
-        }
-
-        int splitSize = config.splitSize();
-        boolean hasPlatinum = container.contains(PlatTokenID);
-        int valueToSplit = (hasPlatinum) ? container.count(PlatTokenID) : container.count(CoinID);
-
-        if (message.length() > SPLIT_COMMAND_STRING.length()) {
-            String msgSplitSize = message.substring(SPLIT_COMMAND_STRING.length() + 1);
-            String[] msgSplitSizeParts = msgSplitSize.split(" ");
-            if (msgSplitSizeParts.length == 1) {
-                try {
-                    splitSize = parseInt(msgSplitSize);
-                } catch (NumberFormatException e) {
-                    item = itemPriceLookup(msgSplitSize);
-                    if (item == null) {
-                        log.debug("Invalid split input");
-                        return;
-                    }
-
-                    valueToSplit = runeLiteConfig.useWikiItemPrices() ? itemManager.getWikiPrice(item) : item.getPrice();
-                }
-                if (splitSize <= 0) {
-                    log.debug("Invalid split size");
-                    return;
-                }
-            } else if (msgSplitSizeParts.length > 1) {
-                try {
-                    splitSize = parseInt(msgSplitSizeParts[msgSplitSizeParts.length - 1]);
-                } catch (NumberFormatException e) {
-                    log.debug("Invalid split input");
-                    return;
-                }
-                if (splitSize <= 0) {
-                    log.debug("Invalid split size");
-                    return;
-                }
-                item = itemPriceLookup(msgSplitSize);
-                if (item != null) {
-                    valueToSplit = runeLiteConfig.useWikiItemPrices() ? itemManager.getWikiPrice(item) : item.getPrice();
-                }
-            } else {
-                return;
-            }
-        }
-
-        int splitValue = valueToSplit / splitSize;
-
-        if (!hasPlatinum && !container.contains(CoinID)) {
-            noCashMessage(messageNode);
-            return;
-        }
-
-        if (item != null) {
-            printSplitItem(item.getName(), splitValue, valueToSplit, splitSize, messageNode);
-        } else {
-            printSplit(hasPlatinum, splitValue, valueToSplit, splitSize, messageNode);
-        }
     }
 
     /**
@@ -383,77 +345,6 @@ public class SplitterPlugin extends Plugin {
 
         // Take a guess
         return shortest;
-    }
-
-    private void noCashMessage(MessageNode messageNode) {
-        final ChatMessageBuilder chatMessageBuilder = new ChatMessageBuilder()
-                .append(ChatColorType.HIGHLIGHT)
-                .append("No Coin(s) or Platinum token(s) in the inventory.");
-        final String response = chatMessageBuilder.build();
-        log.debug("No money in the inventory.");
-        messageNode.setRuneLiteFormatMessage(response);
-        client.refreshChat();
-    }
-
-    private void inventoryHasNotLoaded(MessageNode messageNode) {
-        log.info("Inventory is empty and hasn't loaded.");
-        final ChatMessageBuilder chatMessageBuilder = new ChatMessageBuilder()
-                .append(ChatColorType.HIGHLIGHT)
-                .append("No Coin(s) or Platinum token(s) in the inventory.");
-        final String response = chatMessageBuilder.build();
-        messageNode.setRuneLiteFormatMessage(response);
-        client.refreshChat();
-    }
-
-    private void printSplit(boolean hasPlatinum, int splitValue, int valueToSplit, int splitSize, MessageNode messageNode) {
-        String coinSplit = "Coin";
-        String platinumSplit = "Platinum Token";
-
-        String splitType = (hasPlatinum) ? platinumSplit : coinSplit;
-
-        final ChatMessageBuilder chatMessageBuilder = new ChatMessageBuilder()
-                .append("Splitting " + splitType + "s ")
-                .append(ChatColorType.HIGHLIGHT)
-                .append(QuantityFormatter.formatNumber(splitValue))
-                .append(ChatColorType.NORMAL)
-                .append(", ( ")
-                .append(ChatColorType.HIGHLIGHT)
-                .append(QuantityFormatter.formatNumber(valueToSplit))
-                .append(ChatColorType.NORMAL)
-                .append(" / ")
-                .append(ChatColorType.HIGHLIGHT)
-                .append(QuantityFormatter.formatNumber(splitSize))
-                .append(ChatColorType.NORMAL)
-                .append(" )");
-        final String response = chatMessageBuilder.build();
-        log.debug("Split:" + splitValue);
-        messageNode.setRuneLiteFormatMessage(response);
-        client.refreshChat();
-    }
-
-    private void printSplitItem(String itemName, int splitValue, int valueToSplit, int splitSize, MessageNode messageNode) {
-        final ChatMessageBuilder chatMessageBuilder = new ChatMessageBuilder()
-                .append("Splitting ")
-                .append(ChatColorType.HIGHLIGHT)
-                .append(itemName)
-                .append(ChatColorType.NORMAL)
-                .append(": ")
-                .append(ChatColorType.HIGHLIGHT)
-                .append(QuantityFormatter.formatNumber(splitValue))
-                .append(ChatColorType.NORMAL)
-                .append(", ( ")
-                .append(ChatColorType.HIGHLIGHT)
-                .append(QuantityFormatter.formatNumber(valueToSplit))
-                .append(ChatColorType.NORMAL)
-                .append(" / ")
-                .append(ChatColorType.HIGHLIGHT)
-                .append(QuantityFormatter.formatNumber(splitSize))
-                .append(ChatColorType.NORMAL)
-                .append(" )");
-        final String response = chatMessageBuilder.build();
-        log.debug("Split:" + splitValue);
-        messageNode.setRuneLiteFormatMessage(response);
-        client.refreshChat();
     }
 
     @Provides
