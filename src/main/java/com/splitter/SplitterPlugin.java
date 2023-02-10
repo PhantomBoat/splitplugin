@@ -58,12 +58,10 @@ public class SplitterPlugin extends Plugin {
 
     @Override
     protected void startUp() throws Exception {
-        log.info("SPLITTER SIZE:" + config.splitSize());
     }
 
     @Override
     protected void shutDown() throws Exception {
-        log.info("Splitter stopped!");
     }
 
     /**
