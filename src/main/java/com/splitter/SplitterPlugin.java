@@ -131,11 +131,11 @@ public class SplitterPlugin extends Plugin {
                 return;
             }
 
-            item = itemPriceLookup(String.join("", argElements));
+            item = itemPriceLookup(String.join(" ", argElements));
             if (item != null) {
                 valueToSplit = runeLiteConfig.useWikiItemPrices() ? itemManager.getWikiPrice(item) : item.getPrice();
             } else {
-                printUnableToFindItem(String.join("", argElements));
+                printUnableToFindItem(String.join(" ", argElements));
                 return;
             }
         }
