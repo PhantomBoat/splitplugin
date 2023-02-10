@@ -5,7 +5,7 @@ import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.Range;
 
-@ConfigGroup("example")
+@ConfigGroup("splitter")
 public interface SplitterConfig extends Config
 {
 	@Range(
