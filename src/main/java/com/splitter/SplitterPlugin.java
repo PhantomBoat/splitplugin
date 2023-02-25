@@ -91,11 +91,14 @@ public class SplitterPlugin extends Plugin {
         int splitSize = config.splitSize();
         boolean hasPlatinum = false;
         int valueToSplit = -1;
+
+        // Checks if the inventory contains gold or platinum tokens and then updates hasPlatinum and valueToSplit
         if (container != null) {
             hasPlatinum = container.contains(PlatTokenID);
             valueToSplit = (hasPlatinum) ? container.count(PlatTokenID) : container.count(CoinID);
         }
 
+        // If command was "split::" and nothing more
         if (args.length == 0) {
             int splitValue = valueToSplit / splitSize;
             if (valueToSplit == 0) {
@@ -105,9 +108,17 @@ public class SplitterPlugin extends Plugin {
 
             printSplit(hasPlatinum, splitValue, valueToSplit, splitSize);
             return;
+            // If there was exactly 1 argument, check if argument was a split size or an item to look up the price for
         } else if (args.length == 1) {
             try {
+                // If parseInt throws an exception it is assumed that the argument was an item to look up
                 splitSize = parseInt(args[0]);
+
+                // If argument was a split size but there was no money in the inventory.
+                if (valueToSplit <= 0) {
+                    noCashMessage();
+                    return;
+                }
             } catch (NumberFormatException e) {
                 item = itemPriceLookup(args[0]);
                 if (item == null) {
@@ -121,11 +132,13 @@ public class SplitterPlugin extends Plugin {
         } else {
             String[] argElements;
             try {
+                // Last argument is assumed to the split size
                 splitSize = parseInt(args[args.length - 1]);
                 argElements = Arrays.copyOf(args, args.length - 1);
             } catch (NumberFormatException e) {
                 argElements = args;
             }
+            // If the last argument was a split size but less than or equal to 0
             if (splitSize <= 0) {
                 log.debug("Invalid split size");
                 return;
