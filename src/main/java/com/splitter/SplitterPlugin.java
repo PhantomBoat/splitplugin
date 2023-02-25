@@ -1,24 +1,23 @@
 package com.splitter;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.inject.Provides;
-
-import javax.inject.Inject;
-
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.*;
-import net.runelite.api.events.ChatMessage;
+import net.runelite.api.ChatMessageType;
+import net.runelite.api.Client;
+import net.runelite.api.InventoryID;
+import net.runelite.api.ItemContainer;
 import net.runelite.api.events.CommandExecuted;
 import net.runelite.client.chat.*;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.config.RuneLiteConfig;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.util.QuantityFormatter;
 import net.runelite.http.api.item.ItemPrice;
-import net.runelite.client.game.ItemManager;
 
+import javax.inject.Inject;
 import java.util.Arrays;
 import java.util.List;
 
@@ -91,6 +90,7 @@ public class SplitterPlugin extends Plugin {
         int splitSize = config.splitSize();
         boolean hasPlatinum = false;
         int valueToSplit = -1;
+        String itemName = null;
 
         // Checks if the inventory contains gold or platinum tokens and then updates hasPlatinum and valueToSplit
         if (container != null) {
@@ -98,67 +98,134 @@ public class SplitterPlugin extends Plugin {
             valueToSplit = (hasPlatinum) ? container.count(PlatTokenID) : container.count(CoinID);
         }
 
-        // If command was "split::" and nothing more
-        if (args.length == 0) {
-            int splitValue = valueToSplit / splitSize;
-            if (valueToSplit == 0) {
-                noCashMessage();
-                return;
-            }
-
-            printSplit(hasPlatinum, splitValue, valueToSplit, splitSize);
+        // If command was "split::" and nothing more and there was no money in the inventory
+        if (args.length == 0 && valueToSplit == 0) {
+            noCashMessage();
             return;
+
             // If there was exactly 1 argument, check if argument was a split size or an item to look up the price for
         } else if (args.length == 1) {
-            try {
-                // If parseInt throws an exception it is assumed that the argument was an item to look up
-                splitSize = parseInt(args[0]);
+            int[] splitReturn = extractSplitSize(args);
+            splitSize = splitReturn[0] == -1 ? splitSize : splitReturn[1];
 
-                // If argument was a split size but there was no money in the inventory.
-                if (valueToSplit <= 0) {
-                    noCashMessage();
-                    return;
-                }
-            } catch (NumberFormatException e) {
-                item = itemPriceLookup(args[0]);
-                if (item == null) {
-                    log.debug("Invalid split input");
-                    printUnableToFindItem(args[0]);
-                    return;
-                }
+            // A split size was extracted but the player has NO money in the inventory
+            if (splitReturn[0] >= 0 && valueToSplit == 0) {
+                noCashMessage();
+                return;
 
-                valueToSplit = runeLiteConfig.useWikiItemPrices() ? itemManager.getWikiPrice(item) : item.getPrice();
+                // Split size was not found
+            } else if (splitReturn[0] == -1) {
+                itemName = itemNameConcat(args, splitReturn[0]);
+                valueToSplit = getValueOfItem(itemName);
+
+                // An item was not found
+                if (valueToSplit == -1) {
+                    printUnableToFindItem(itemName);
+                    return;
+                } else {
+                    item = itemPrice(itemName);
+                }
             }
-        } else {
-            String[] argElements;
-            try {
-                // Last argument is assumed to the split size
-                splitSize = parseInt(args[args.length - 1]);
-                argElements = Arrays.copyOf(args, args.length - 1);
-            } catch (NumberFormatException e) {
-                argElements = args;
-            }
-            // If the last argument was a split size but less than or equal to 0
-            if (splitSize <= 0) {
-                log.debug("Invalid split size");
+        } else if (args.length > 1) {
+            int[] splitReturn = extractSplitSize(args);
+            splitSize = splitReturn[0] == -1 ? splitSize : splitReturn[1];
+            itemName = itemNameConcat(args, splitReturn[0]);
+            valueToSplit = getValueOfItem(itemName);
+
+            if (valueToSplit == -1) {
+                printUnableToFindItem(itemName);
                 return;
             }
 
-            item = itemPriceLookup(String.join(" ", argElements));
-            if (item != null) {
-                valueToSplit = runeLiteConfig.useWikiItemPrices() ? itemManager.getWikiPrice(item) : item.getPrice();
-            } else {
-                printUnableToFindItem(String.join(" ", argElements));
-                return;
-            }
+            item = itemPrice(itemName);
         }
 
+        if (splitSize == 0) {
+            chatMessageManager.queue(QueuedMessage.builder()
+                    .type(ChatMessageType.GAMEMESSAGE)
+                    .value("Unable to split by 0.")
+                    .build());
+            return;
+        }
         int splitValue = valueToSplit / splitSize;
 
         if (item != null) {
             printSplitItem(item.getName(), splitValue, valueToSplit, splitSize);
         } else {
             printSplit(hasPlatinum, splitValue, valueToSplit, splitSize);
+        }
+    }
+
+    /**
+     * Concatenates the appropriate args based on where the split size was found.
+     *
+     * @param args           all arguments given to ::split
+     * @param splitSizeIndex 0 if first elem in args is split size, 1 if last elem in split size, -1 if neither was split size
+     * @return concatenated String from args based on splitSizeIndex
+     */
+    private String itemNameConcat(String[] args, int splitSizeIndex) {
+        String[] argsExtracted;
+
+        // Last element was split size
+        if (splitSizeIndex == 1) {
+            argsExtracted = Arrays.copyOf(args, args.length - 1);
+
+            // First element was split size
+        } else if (splitSizeIndex == 0) {
+            argsExtracted = Arrays.copyOfRange(args, 1, args.length);
+
+            // None of the elements was split size
+        } else {
+            argsExtracted = args;
+        }
+
+        return String.join(" ", argsExtracted);
+    }
+
+    /**
+     * Returns the value of the item to split or -1 if no item was found.
+     *
+     * @param itemName looked up for item match
+     * @return returns the value of item match, -1 if no match was found
+     */
+    private int getValueOfItem(String itemName) {
+        ItemPrice item = itemPrice(itemName);
+        if (item != null) {
+            return runeLiteConfig.useWikiItemPrices() ? itemManager.getWikiPrice(item) : item.getPrice();
+        } else {
+            return -1;
+        }
+    }
+
+    /**
+     * Returns a 2-size array with the first element being 1 if the last element of args is found as a split size, or
+     * 0 if the first element is found as a split size, or -1 if neither first nor last element found as a split size.
+     * Second element of the array contains the split size.
+     *
+     * @param args all arguments given to ::split
+     * @return a two element array with the first element being status and the last element being split size
+     */
+    private int[] extractSplitSize(String[] args) {
+        int splitSize;
+
+        if (args.length == 0) {
+            log.debug("Bad code, don't run extractSplitSize with an empty array");
+            return new int[]{-1, 0};
+        }
+
+        try {
+            // Last argument is assumed to the split size
+            splitSize = parseInt(args[args.length - 1]);
+            return new int[]{1, splitSize};
+
+            // If exception was raised by parseInt, try if the first element is a split size
+        } catch (NumberFormatException e) {
+            try {
+                splitSize = parseInt(args[0]);
+                return new int[]{0, splitSize};
+            } catch (NumberFormatException f) {
+                return new int[]{-1, 0};
+            }
         }
     }
 
@@ -189,10 +256,10 @@ public class SplitterPlugin extends Plugin {
     /**
      * Prints split in chat with formatted text. Intended for when splitting coins or platinum tokens, not for splitting items.
      *
-     * @param hasPlatinum true if splitting platinum tokens, false if splitting coins
-     * @param splitValue the value of each portion of the split
+     * @param hasPlatinum  true if splitting platinum tokens, false if splitting coins
+     * @param splitValue   the value of each portion of the split
      * @param valueToSplit the total value to split
-     * @param splitSize the number of portions
+     * @param splitSize    the number of portions
      */
     private void printSplit(boolean hasPlatinum, int splitValue, int valueToSplit, int splitSize) {
         String coinSplit = "Coin";
@@ -226,10 +293,10 @@ public class SplitterPlugin extends Plugin {
     /**
      * Prints split in chat with formatted text. Intended for when splitting items, not coins or platinum tokens.
      *
-     * @param itemName name of the item being split
-     * @param splitValue the value of each portion of the split
+     * @param itemName     name of the item being split
+     * @param splitValue   the value of each portion of the split
      * @param valueToSplit the total value to split
-     * @param splitSize the number of portions
+     * @param splitSize    the number of portions
      */
     private void printSplitItem(String itemName, int splitValue, int valueToSplit, int splitSize) {
         final String response = new ChatMessageBuilder()
@@ -279,37 +346,6 @@ public class SplitterPlugin extends Plugin {
                 .runeLiteFormattedMessage(response)
                 .build());
         log.debug("Unable to find item");
-    }
-
-    /**
-     * Returns item GE price if found in substring. Returns 0 if
-     *
-     * @param substring the message with "!split " removed
-     * @return if found returns ItemPrice otherwise null
-     */
-
-    private ItemPrice itemPriceLookup(String substring) {
-        String[] substringParts = substring.split(" ");
-
-        // substring is either the splitSize or item name to split by default
-        if (substringParts.length < 2) {
-            // if the substring can be parsed then it's presumed to be splitSize and not an item
-            try {
-                parseInt(substring);
-                return null;
-            } catch (NumberFormatException e) {
-                return itemPrice(substring);
-            }
-        } else {
-            try {
-                parseInt(substringParts[substringParts.length - 1]);
-                String[] allButLastElement = Arrays.copyOf(substringParts, substringParts.length - 1);
-                return itemPrice(String.join("", allButLastElement));
-
-            } catch (NumberFormatException e) {
-                return itemPrice(substring);
-            }
-        }
     }
 
     /**
