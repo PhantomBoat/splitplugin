@@ -141,10 +141,7 @@ public class SplitterPlugin extends Plugin {
         }
 
         if (splitSize == 0) {
-            chatMessageManager.queue(QueuedMessage.builder()
-                    .type(ChatMessageType.GAMEMESSAGE)
-                    .value("Unable to split by 0.")
-                    .build());
+            cannotSplitByZero();
             return;
         }
         int splitValue = valueToSplit / splitSize;
@@ -227,6 +224,18 @@ public class SplitterPlugin extends Plugin {
                 return new int[]{-1, 0};
             }
         }
+    }
+
+    /**
+     * Informs the user that the plugin read the input as if the user set split size to 0.
+     */
+    private void cannotSplitByZero()
+    {
+        log.debug("Split size was 0");
+        chatMessageManager.queue(QueuedMessage.builder()
+                .type(ChatMessageType.GAMEMESSAGE)
+                .value("Unable to split by 0.")
+                .build());
     }
 
     /**
