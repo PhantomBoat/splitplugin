@@ -89,7 +89,7 @@ public class SplitterPlugin extends Plugin {
 
         int splitSize = config.splitSize();
         boolean hasPlatinum = false;
-        int valueToSplit = -1;
+        int valueToSplit = 0;
         String itemName = null;
 
         // Checks if the inventory contains gold or platinum tokens and then updates hasPlatinum and valueToSplit
